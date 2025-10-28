@@ -6,6 +6,8 @@ const cors = require('cors');
 const app = express();
 const port = process.env.PORT || 3001;
 
+const llmRoutes = require('./routes/llm'); // 引入路由
+
 // 中间件
 app.use(cors()); // 允许所有跨域请求 (开发)
 app.use(express.json()); // 解析 JSON body
@@ -19,6 +21,7 @@ app.get('/', (req, res) => {
     });
 
 // TODO: 在这里添加其他 API 路由
+app.use('/api/llm', llmRoutes); // 挂载到 /api/llm 路径
 
 app.listen(port, () => {
   console.log(`服务器运行在 http://localhost:${port}`);
