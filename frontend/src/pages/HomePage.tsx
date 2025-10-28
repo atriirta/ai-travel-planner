@@ -189,30 +189,60 @@ const HomePage: React.FC = () => {
 
   // --- 5.2 & 7.5 重构：语音逻辑 ---
   const uploadAudio = async (
-    audioBlob: Blob,
-    formInstance: FormInstance,
-    fieldName: string
-  ) => {
-    setLoading(true);
-    const formData = new FormData();
-    formData.append('audio', audioBlob, 'recording.webm');
+  audioBlob: Blob,
+  formInstance: FormInstance, // (form 或 expenseForm)
+  fieldName: string          // ('preferences' 或 'description')
+) => {
+  setLoading(true);
+  const formData = new FormData();
+  formData.append('audio', audioBlob, 'recording.webm');
 
-    try {
-      const response = await axios.post(`${API_URL}/api/voice/transcribe`, formData);
-      const { transcription } = response.data;
+  try {
+    // 步骤 1: 语音转文本 (API 不变)
+    const voiceResponse = await axios.post(`${API_URL}/api/voice/transcribe`, formData);
+    const { transcription } = voiceResponse.data;
 
-      if (transcription) {
-        formInstance.setFieldsValue({
-          [fieldName]: transcription,
-        });
-        message.success('语音识别成功！');
-      } else { throw new Error('未收到转写文本'); }
-    } catch (error: any) {
-      message.error('语音识别失败');
-    } finally {
-      setLoading(false);
+    if (!transcription) {
+      throw new Error('未收到转写文本');
     }
-  };
+
+    // --- [核心升级] ---
+    // 步骤 2: 检查这个语音是用于哪个表单的
+
+    // A. 如果是主表单 (form) 并且用于 'preferences' 字段...
+    if (formInstance === form && fieldName === 'preferences') {
+      message.info('识别成功，正在智能填充表单...');
+
+      // 步骤 3: ...调用新的 /extract 接口
+      const extractResponse = await axios.post(`${API_URL}/api/llm/extract`, {
+        text: transcription
+      });
+
+      const extractedData = extractResponse.data;
+
+      // 步骤 4: 自动填充 *所有* 表单字段
+      // (后端已帮我们过滤了 null 值)
+      form.setFieldsValue(extractedData);
+
+      message.success('表单已智能填充！');
+
+    } else {
+      // B. 否则 (例如：这是“记一笔开销”的描述框)
+      // 保持原有逻辑：只填充那一个字段
+      formInstance.setFieldsValue({
+        [fieldName]: transcription,
+      });
+      message.success('语音识别成功！');
+    }
+    // --- [升级结束] ---
+
+  } catch (error: any) {
+    console.error('语音处理流程失败:', error);
+    message.error('语音处理失败');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const startRecording = async (
     formInstance: FormInstance,

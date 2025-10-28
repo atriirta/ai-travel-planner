@@ -3,6 +3,29 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
+// [新] 步骤 1：添加实体提取 Prompt
+const createExtractPrompt = (text) => {
+  return `
+  你是一个信息提取助理。请从以下文本中提取关键旅行信息。
+  文本: "${text}"
+
+  请严格按照以下 JSON 格式返回，所有键都必须存在。
+  1. 'destination' (string): 目的地，如果未提及，返回 null。
+  2. 'days' (number): 天数，只返回数字，如果未提及，返回 null。
+  3. 'budget' (number): 预算，只返回数字（例如 "1万" 提取为 10000），如果未提及，返回 null。
+  4. 'companions' (string): 同行人数，例如 "2人" 或 "带孩子"，如果未提及，返回 null。
+  5. 'preferences' (string): 除去以上信息后，用户剩余的偏好描述，如果未提及，返回 null。
+
+  示例:
+  - 文本: "我想去美国，7天，预算 2 万，一个人, 喜欢自然风光。"
+  - JSON: {"destination": "美国", "days": 7, "budget": 20000, "companions": "1人", "preferences": "喜欢自然风光"}
+  - 文本: "我想去上海玩"
+  - JSON: {"destination": "上海", "days": null, "budget": null, "companions": null, "preferences": null}
+
+  请只返回 JSON 对象，不要包含任何解释性文字或 markdown 标记。
+  `;
+};
+
 // 我们将在这里定义一个非常重要的 "Prompt"
 const createTravelPrompt = (inputs) => {
   const { destination, days, budget, companions, preferences } = inputs;
@@ -80,5 +103,62 @@ router.post('/plan', async (req, res) => {
     res.status(500).json({ error: '生成计划失败' });
   }
 });
+
+// [新] 步骤 2：添加 /extract API 路由
+router.post('/extract', async (req, res) => {
+  const { text } = req.body;
+  if (!text) {
+    return res.status(400).json({ error: '缺少文本' });
+  }
+
+  try {
+    const prompt = createExtractPrompt(text);
+    const url = 'https://api.deepseek.com/chat/completions';;
+
+    const response = await axios.post(
+      url,
+      {
+        model: 'deepseek-chat', // 使用 qwen-plus 进行精确提取
+        messages: [
+          { role: 'system', content: 'You are a helpful entity extraction assistant.' },
+          { role: 'user', content: prompt }
+        ],
+        stream: false
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+        }
+      }
+    );
+
+    const llmResponse = response.data.choices[0].message.content;
+
+    // 尝试解析 LLM 返回的 JSON 字符串
+    try {
+      const extractedData = JSON.parse(llmResponse);
+
+      // 过滤掉值为 null 的键，防止它们覆盖表单中的默认值
+      const filteredData = {};
+      for (const key in extractedData) {
+        if (extractedData[key] !== null) {
+          // @ts-ignore
+          filteredData[key] = extractedData[key];
+        }
+      }
+
+      res.json(filteredData);
+    } catch (e) {
+      console.error('LLM /extract JSON 解析失败:', llmResponse, e);
+      throw new Error("Failed to parse LLM JSON response");
+    }
+
+  } catch (error) {
+    console.error('LLM /extract API Error:', error.response ? error.response.data : error.message);
+    res.status(500).json({ error: '提取信息失败' });
+  }
+});
+
 
 module.exports = router;
