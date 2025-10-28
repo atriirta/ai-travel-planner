@@ -11,49 +11,46 @@ import {
   Typography,
   InputNumber,
   Tooltip,
-  Row,    // 新增：布局
-  Col,    // 新增：布局
-  Collapse, // 新增：折叠面板
-  Timeline, // 新增：时间轴
+  Row,
+  Col,
+  Collapse,
+  Timeline,
 } from 'antd';
 import {
   AudioOutlined,
   StopFilled,
-  EnvironmentOutlined, // 新增：图标
-  FieldTimeOutlined    // 新增：图标
+  EnvironmentOutlined,
+  FieldTimeOutlined
 } from '@ant-design/icons';
-import MapComponent from '../components/MapComponent'; // <-- 步骤 6.1：导入地图组件
+import MapComponent from '../components/MapComponent';
+import { useAuth } from '../contexts/AuthContext'; // <-- 步骤 7.3：导入 Auth Hook
 
 const { Title } = Typography;
 const { TextArea } = Input;
 const API_URL = import.meta.env.VITE_API_BASE_URL;
 
-// --- 步骤 6.1：为 LLM 返回的 plan 定义 TypeScript 接口 ---
+// --- TypeScript 接口 (来自步骤 6) ---
 interface Location {
   name: string;
   lat: number;
   lng: number;
 }
-
 interface Activity {
   time: string;
   activity: string;
   description: string;
   location: Location;
 }
-
 interface DailyPlan {
   day: number;
   theme: string;
   activities: Activity[];
 }
-
 interface BudgetBreakdown {
   category: string;
   cost: string;
   notes: string;
 }
-
 interface PlanData {
   title: string;
   budget_analysis: {
@@ -64,23 +61,27 @@ interface PlanData {
 }
 // --- 结束定义 ---
 
-
 const HomePage: React.FC = () => {
-  const [loading, setLoading] = useState(false);
-  // 使用我们定义的接口
+  const [loading, setLoading] = useState(false); // AI 生成时的 loading
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [form] = Form.useForm();
 
+  // --- 步骤 7.3：新增状态 ---
+  const { session } = useAuth(); // 获取 session，里面包含 user.id
+  const [isSaving, setIsSaving] = useState(false); // 保存按钮的 loading
+  // --- 结束 ---
+
+  // --- 语音状态 (来自步骤 5) ---
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  // --- 结束 ---
 
-  // 表单提交函数 (无变化)
+  // 表单提交函数 (来自步骤 4)
   const handleFormSubmit = async (values: any) => {
     setLoading(true);
     setPlan(null);
-    console.log('发送给后端的需求:', values);
     try {
       const response = await axios.post(`${API_URL}/api/llm/plan`, values);
       setPlan(response.data);
@@ -93,7 +94,37 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // 语音相关函数 (无变化)
+  // --- 步骤 7.3：新增保存函数 ---
+  const handleSavePlan = async () => {
+    if (!plan || !session?.user) {
+      message.error('没有可保存的计划或用户未登录');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // 准备要发送到后端的数据
+      const payload = {
+        user_id: session.user.id,
+        title: plan.title || '未命名计划',
+        plan_data: plan, // 将完整的 plan JSON 对象存入 jsonb 字段
+      };
+
+      // 调用我们在 7.2 中创建的后端 API
+      await axios.post(`${API_URL}/api/plans/save`, payload);
+
+      message.success('计划已成功保存到云端！');
+
+    } catch (error: any) {
+      console.error('保存计划失败:', error.response ? error.response.data : error.message);
+      message.error('保存计划失败');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  // --- 结束 ---
+
+  // 语音相关函数 (来自步骤 5, 无变化)
   const uploadAudio = async (audioBlob: Blob) => {
     setLoading(true);
     const formData = new FormData();
@@ -117,8 +148,7 @@ const HomePage: React.FC = () => {
 
   const startRecording = async () => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      message.error('您的浏览器不支持录音功能');
-      return;
+      message.error('您的浏览器不支持录音功能'); return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -130,17 +160,13 @@ const HomePage: React.FC = () => {
       recorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         uploadAudio(audioBlob);
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
+        if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
       };
       recorder.start();
       setIsRecording(true);
       message.info('录音已开始...');
     } catch (err) {
-      message.error('无法获取麦克风权限，请检查浏览器设置');
-      console.error('麦克风权限错误:', err);
+      message.error('无法获取麦克风权限');
     }
   };
 
@@ -165,7 +191,7 @@ const HomePage: React.FC = () => {
         智能行程规划
       </Title>
 
-      {/* --- 1. 需求输入卡片 (无变化) --- */}
+      {/* --- 需求输入卡片 (来自步骤 6) --- */}
       <Card title="请输入您的旅行需求">
         <Form
           form={form}
@@ -221,7 +247,7 @@ const HomePage: React.FC = () => {
         </Form>
       </Card>
 
-      {/* --- 2. Loading 状态 (无变化) --- */}
+      {/* --- Loading 状态 (来自步骤 6) --- */}
       {loading && !isRecording && (
         <div style={{ textAlign: 'center', marginTop: '40px' }}>
           <Spin size="large" />
@@ -229,37 +255,43 @@ const HomePage: React.FC = () => {
         </div>
       )}
 
-      {/* --- 3. 步骤 6.1：结果展示区 (重大更新) --- */}
-      {/* 这里我们不再使用 <pre> 标签
-        而是使用两栏布局，左侧地图，右侧日程
-      */}
+      {/* --- 结果展示区 (来自步骤 6，并增加了 7.3 的按钮) --- */}
       {plan && !loading && (
-        <Card title={plan.title || "您的专属旅行计划"} style={{ marginTop: 24 }}>
+        <Card
+          title={plan.title || "您的专属旅行计划"}
+          style={{ marginTop: 24 }}
+          // --- 步骤 7.3：新增 "extra" 属性 ---
+          extra={
+            <Button
+              type="primary"
+              onClick={handleSavePlan}
+              loading={isSaving}
+            >
+              保存此计划
+            </Button>
+          }
+          // --- 结束 ---
+        >
           <Row gutter={[24, 24]}>
-
-            {/* --- 左侧栏：地图和预算 --- */}
             <Col xs={24} md={12}>
               <Title level={4}>行程概览地图</Title>
-              {/* 这里使用地图组件，并传入 plan 数据 */}
               <MapComponent plan={plan} />
 
               <Title level={4} style={{ marginTop: '16px' }}>预算分析</Title>
               <p><strong>总估算: {plan.budget_analysis.total_estimate}</strong></p>
               <Timeline
-                items={plan.budget_analysis.breakdown.map((item) => ({
+                items={plan.budget_analysis.breakdown.map((item, index) => ({
+                  key: index,
                   children: `${item.category}: ${item.cost} (${item.notes})`,
                 }))}
               />
             </Col>
 
-            {/* --- 右侧栏：详细日程 --- */}
             <Col xs={24} md={12}>
               <Title level={4}>详细日程</Title>
-              {/* 使用折叠面板展示每一天 */}
               <Collapse defaultActiveKey={['1']}>
                 {plan.daily_plan.map(day => (
                   <Collapse.Panel header={`第 ${day.day} 天: ${day.theme}`} key={day.day}>
-                    {/* 使用时间轴展示活动 */}
                     <Timeline>
                       {day.activities.map((activity, index) => (
                         <Timeline.Item key={index} dot={<FieldTimeOutlined />}>
@@ -278,7 +310,6 @@ const HomePage: React.FC = () => {
                 ))}
               </Collapse>
             </Col>
-
           </Row>
         </Card>
       )}
