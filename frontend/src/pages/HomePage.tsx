@@ -1,5 +1,5 @@
 // frontend/src/pages/HomePage.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react'; // 7.4.4 新增了 useEffect
 import axios from 'axios';
 import {
   Form,
@@ -23,34 +23,19 @@ import {
   FieldTimeOutlined
 } from '@ant-design/icons';
 import MapComponent from '../components/MapComponent';
-import { useAuth } from '../contexts/AuthContext'; // <-- 步骤 7.3：导入 Auth Hook
+import { useAuth } from '../contexts/AuthContext'; // 7.3 导入
 
 const { Title } = Typography;
 const { TextArea } = Input;
 const API_URL = import.meta.env.VITE_API_BASE_URL;
 
 // --- TypeScript 接口 (来自步骤 6) ---
-interface Location {
-  name: string;
-  lat: number;
-  lng: number;
-}
-interface Activity {
-  time: string;
-  activity: string;
-  description: string;
-  location: Location;
-}
-interface DailyPlan {
-  day: number;
-  theme: string;
-  activities: Activity[];
-}
-interface BudgetBreakdown {
-  category: string;
-  cost: string;
-  notes: string;
-}
+interface Location { name: string; lat: number; lng: number; }
+interface Activity { time: string; activity: string; description: string; location: Location; }
+interface DailyPlan { day: number; theme: string; activities: Activity[]; }
+interface BudgetBreakdown { category: string; cost: string; notes: string; }
+
+// 这是 AI 生成的原始 Plan
 interface PlanData {
   title: string;
   budget_analysis: {
@@ -59,32 +44,58 @@ interface PlanData {
   };
   daily_plan: DailyPlan[];
 }
+
+// 7.4.4 新增：这是存入数据库的 Plan (包含 id 和 plan_data)
+interface ISavedPlan {
+  id: number;
+  created_at: string;
+  user_id: string;
+  title: string;
+  plan_data: PlanData; // AI 的 JSON 存在这里
+}
 // --- 结束定义 ---
+
 
 const HomePage: React.FC = () => {
   const [loading, setLoading] = useState(false); // AI 生成时的 loading
-  const [plan, setPlan] = useState<PlanData | null>(null);
+  // 7.4.4 升级：plan 状态现在可以是新计划，也可以是已保存的计划
+  const [plan, setPlan] = useState<PlanData | ISavedPlan | null>(null);
   const [form] = Form.useForm();
 
-  // --- 步骤 7.3：新增状态 ---
-  const { session } = useAuth(); // 获取 session，里面包含 user.id
-  const [isSaving, setIsSaving] = useState(false); // 保存按钮的 loading
-  // --- 结束 ---
+  const { session } = useAuth(); // 7.3 获取 session
+  const [isSaving, setIsSaving] = useState(false); // 7.3 保存按钮的 loading
 
-  // --- 语音状态 (来自步骤 5) ---
+  // 语音状态 (来自步骤 5)
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  // --- 结束 ---
+
+  // 7.4.4 新增：页面加载时，检查 sessionStorage 是否有要加载的计划
+  useEffect(() => {
+    const loadedPlanString = sessionStorage.getItem('loadedPlan');
+    if (loadedPlanString) {
+      try {
+        const loadedPlan: ISavedPlan = JSON.parse(loadedPlanString);
+        // 直接设置从 "我的计划" 页面传来的 ISavedPlan 对象
+        setPlan(loadedPlan);
+
+        // 关键：加载后必须清除，否则每次刷新都会加载
+        sessionStorage.removeItem('loadedPlan');
+      } catch (e) {
+        console.error('加载 plan 失败', e);
+        sessionStorage.removeItem('loadedPlan');
+      }
+    }
+  }, []); // 空依赖数组，确保只在组件首次挂载时运行
 
   // 表单提交函数 (来自步骤 4)
   const handleFormSubmit = async (values: any) => {
     setLoading(true);
-    setPlan(null);
+    setPlan(null); // 清空旧计划
     try {
       const response = await axios.post(`${API_URL}/api/llm/plan`, values);
-      setPlan(response.data);
+      setPlan(response.data); // 此时的 plan 是 PlanData (无 id)
       message.success('行程规划生成成功！');
     } catch (error: any) {
       console.error('规划失败:', error.response ? error.response.data : error.message);
@@ -94,7 +105,7 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // --- 步骤 7.3：新增保存函数 ---
+  // 7.4.4 升级：保存函数
   const handleSavePlan = async () => {
     if (!plan || !session?.user) {
       message.error('没有可保存的计划或用户未登录');
@@ -103,15 +114,23 @@ const HomePage: React.FC = () => {
 
     setIsSaving(true);
     try {
-      // 准备要发送到后端的数据
+      // 7.4.4 升级：兼容处理新旧 plan 结构
+      // @ts-ignore
+      const planDataToSave = plan.plan_data || plan;
+      // @ts-ignore
+      const titleToSave = plan.title || '未命名计划';
+
       const payload = {
         user_id: session.user.id,
-        title: plan.title || '未命名计划',
-        plan_data: plan, // 将完整的 plan JSON 对象存入 jsonb 字段
+        title: titleToSave,
+        plan_data: planDataToSave, // 将完整的 plan JSON 对象存入 jsonb 字段
       };
 
-      // 调用我们在 7.2 中创建的后端 API
-      await axios.post(`${API_URL}/api/plans/save`, payload);
+      // 7.4.4 升级：后端会返回新保存的 ISavedPlan 对象
+      const response = await axios.post<ISavedPlan>(`${API_URL}/api/plans/save`, payload);
+
+      // 7.4.4 升级：用返回的数据（包含 plan.id）更新当前 plan 状态
+      setPlan(response.data);
 
       message.success('计划已成功保存到云端！');
 
@@ -122,7 +141,6 @@ const HomePage: React.FC = () => {
       setIsSaving(false);
     }
   };
-  // --- 结束 ---
 
   // 语音相关函数 (来自步骤 5, 无变化)
   const uploadAudio = async (audioBlob: Blob) => {
@@ -135,9 +153,7 @@ const HomePage: React.FC = () => {
       if (transcription) {
         form.setFieldsValue({ preferences: transcription });
         message.success('语音识别成功！');
-      } else {
-        throw new Error('未收到转写文本');
-      }
+      } else { throw new Error('未收到转写文本'); }
     } catch (error: any) {
       console.error('语音识别失败:', error.response ? error.response.data : error.message);
       message.error('语音识别失败');
@@ -184,6 +200,19 @@ const HomePage: React.FC = () => {
   };
   // --- 语音函数结束 ---
 
+  // 7.4.4 新增：辅助函数，用于从 plan 状态中获取真正的 PlanData
+  // 无论 plan 是 AI 返回的新计划，还是从 DB 加载的已保存计划
+  const getPlanData = (): PlanData | null => {
+    if (!plan) return null;
+    // @ts-ignore
+    if (plan.plan_data) {
+      // @ts-ignore
+      return plan.plan_data as PlanData; // 这是一个 ISavedPlan 对象
+    }
+    return plan as PlanData; // 这是一个 PlanData 对象
+  };
+
+  const currentPlanData = getPlanData();
 
   return (
     <div>
@@ -255,19 +284,22 @@ const HomePage: React.FC = () => {
         </div>
       )}
 
-      {/* --- 结果展示区 (来自步骤 6，并增加了 7.3 的按钮) --- */}
-      {plan && !loading && (
+      {/* --- 结果展示区 (来自步骤 6，并增加了 7.4.4 的按钮逻辑) --- */}
+      {currentPlanData && !loading && (
         <Card
-          title={plan.title || "您的专属旅行计划"}
+          title={currentPlanData.title || "您的专属旅行计划"}
           style={{ marginTop: 24 }}
-          // --- 步骤 7.3：新增 "extra" 属性 ---
+          // --- 步骤 7.4.4：升级 "extra" 属性 ---
           extra={
             <Button
               type="primary"
               onClick={handleSavePlan}
               loading={isSaving}
+              // @ts-ignore
+              disabled={!!plan.id} // 关键：如果 plan.id 存在，说明已保存
             >
-              保存此计划
+              {/* @ts-ignore */}
+              {plan.id ? '计划已保存' : '保存此计划'}
             </Button>
           }
           // --- 结束 ---
@@ -275,12 +307,14 @@ const HomePage: React.FC = () => {
           <Row gutter={[24, 24]}>
             <Col xs={24} md={12}>
               <Title level={4}>行程概览地图</Title>
-              <MapComponent plan={plan} />
+              {/* 7.4.4 升级：使用 currentPlanData */}
+              <MapComponent plan={currentPlanData} />
 
               <Title level={4} style={{ marginTop: '16px' }}>预算分析</Title>
-              <p><strong>总估算: {plan.budget_analysis.total_estimate}</strong></p>
+              {/* 7.4.4 升级：使用 currentPlanData */}
+              <p><strong>总估算: {currentPlanData.budget_analysis.total_estimate}</strong></p>
               <Timeline
-                items={plan.budget_analysis.breakdown.map((item, index) => ({
+                items={currentPlanData.budget_analysis.breakdown.map((item, index) => ({
                   key: index,
                   children: `${item.category}: ${item.cost} (${item.notes})`,
                 }))}
@@ -290,7 +324,8 @@ const HomePage: React.FC = () => {
             <Col xs={24} md={12}>
               <Title level={4}>详细日程</Title>
               <Collapse defaultActiveKey={['1']}>
-                {plan.daily_plan.map(day => (
+                {/* 7.4.4 升级：使用 currentPlanData */}
+                {currentPlanData.daily_plan.map(day => (
                   <Collapse.Panel header={`第 ${day.day} 天: ${day.theme}`} key={day.day}>
                     <Timeline>
                       {day.activities.map((activity, index) => (
