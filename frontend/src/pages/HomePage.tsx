@@ -11,29 +11,72 @@ import {
   Typography,
   InputNumber,
   Tooltip,
+  Row,    // 新增：布局
+  Col,    // 新增：布局
+  Collapse, // 新增：折叠面板
+  Timeline, // 新增：时间轴
 } from 'antd';
-// 1. 导入 useRef
-// 2. 导入图标
-import { AudioOutlined, StopFilled } from '@ant-design/icons';
+import {
+  AudioOutlined,
+  StopFilled,
+  EnvironmentOutlined, // 新增：图标
+  FieldTimeOutlined    // 新增：图标
+} from '@ant-design/icons';
+import MapComponent from '../components/MapComponent'; // <-- 步骤 6.1：导入地图组件
 
 const { Title } = Typography;
 const { TextArea } = Input;
 const API_URL = import.meta.env.VITE_API_BASE_URL;
 
+// --- 步骤 6.1：为 LLM 返回的 plan 定义 TypeScript 接口 ---
+interface Location {
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+interface Activity {
+  time: string;
+  activity: string;
+  description: string;
+  location: Location;
+}
+
+interface DailyPlan {
+  day: number;
+  theme: string;
+  activities: Activity[];
+}
+
+interface BudgetBreakdown {
+  category: string;
+  cost: string;
+  notes: string;
+}
+
+interface PlanData {
+  title: string;
+  budget_analysis: {
+    total_estimate: string;
+    breakdown: BudgetBreakdown[];
+  };
+  daily_plan: DailyPlan[];
+}
+// --- 结束定义 ---
+
+
 const HomePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
-  const [plan, setPlan] = useState<any | null>(null);
+  // 使用我们定义的接口
+  const [plan, setPlan] = useState<PlanData | null>(null);
   const [form] = Form.useForm();
 
-  // --- 语音输入新增状态 ---
   const [isRecording, setIsRecording] = useState(false);
-  // 使用 useRef 来存储 MediaRecorder 实例、音频块和媒体流
-  // 这样可以避免因组件重渲染导致的状态丢失
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  // --- 结束 ---
 
+  // 表单提交函数 (无变化)
   const handleFormSubmit = async (values: any) => {
     setLoading(true);
     setPlan(null);
@@ -44,31 +87,22 @@ const HomePage: React.FC = () => {
       message.success('行程规划生成成功！');
     } catch (error: any) {
       console.error('规划失败:', error.response ? error.response.data : error.message);
-      message.error('行程规划失败');
+      message.error('行程规划失败，请检查后端日志');
     } finally {
       setLoading(false);
     }
   };
 
-  // --- 语音输入新增函数 ---
-
-  // 1. 上传音频到后端
+  // 语音相关函数 (无变化)
   const uploadAudio = async (audioBlob: Blob) => {
-    setLoading(true); // 复用 loading 状态
+    setLoading(true);
     const formData = new FormData();
-    // 'audio' 键必须和后端 upload.single('audio') 一致
     formData.append('audio', audioBlob, 'recording.webm');
-
     try {
-      // 调用我们在 5.1 中创建的模拟后端
       const response = await axios.post(`${API_URL}/api/voice/transcribe`, formData);
       const { transcription } = response.data;
-
-      // 将识别结果自动填入表单
       if (transcription) {
-        form.setFieldsValue({
-          preferences: transcription, // 自动填充到 "preferences" 字段
-        });
+        form.setFieldsValue({ preferences: transcription });
         message.success('语音识别成功！');
       } else {
         throw new Error('未收到转写文本');
@@ -81,41 +115,26 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // 2. 开始录音
   const startRecording = async () => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       message.error('您的浏览器不支持录音功能');
       return;
     }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream; // 保存 stream 以便后续停止
-
-      // 使用 'audio/webm' 格式，它在浏览器中兼容性最好
+      streamRef.current = stream;
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       mediaRecorderRef.current = recorder;
-      audioChunksRef.current = []; // 清空之前的音频块
-
-      // 录音数据可用时
-      recorder.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data);
-      };
-
-      // 录音停止时
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => audioChunksRef.current.push(event.data);
       recorder.onstop = () => {
-        // 创建一个 Blob
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        // 上传到后端
         uploadAudio(audioBlob);
-
-        // 停止并释放麦克风权限
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop());
           streamRef.current = null;
         }
       };
-
       recorder.start();
       setIsRecording(true);
       message.info('录音已开始...');
@@ -125,31 +144,28 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // 3. 停止录音
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop(); // 这将触发 onstop 事件
+      mediaRecorderRef.current.stop();
       setIsRecording(false);
       message.info('录音已停止，正在处理...');
     }
   };
 
-  // 4. 切换按钮的点击事件
   const handleVoiceButtonClick = () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
+    if (isRecording) stopRecording();
+    else startRecording();
   };
+  // --- 语音函数结束 ---
 
-  // --- 结束 ---
 
   return (
     <div>
       <Title level={2} style={{ marginBottom: '24px' }}>
         智能行程规划
       </Title>
+
+      {/* --- 1. 需求输入卡片 (无变化) --- */}
       <Card title="请输入您的旅行需求">
         <Form
           form={form}
@@ -163,7 +179,7 @@ const HomePage: React.FC = () => {
             preferences: '喜欢美食和动漫',
           }}
         >
-          {/* ... 其他 Form.Item ... */}
+          {/* ... (Form.Item 省略，和之前一样) ... */}
           <Form.Item label="目的地" name="destination" rules={[{ required: true, message: '请输入目的地!' }]}>
             <Input placeholder="例如：日本、云南、巴黎" />
           </Form.Item>
@@ -176,8 +192,6 @@ const HomePage: React.FC = () => {
           <Form.Item label="同行人数" name="companions" rules={[{ required: true, message: '请输入同行人数!' }]}>
             <Input placeholder="例如：2人、带孩子、独自旅行" />
           </Form.Item>
-
-          {/* --- 语音输入 JSX 修改 --- */}
           <Form.Item
             label={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
@@ -185,11 +199,11 @@ const HomePage: React.FC = () => {
                 <Tooltip title={isRecording ? '停止录音' : '按住说话'}>
                   <Button
                     type={isRecording ? 'primary' : 'default'}
-                    danger={isRecording} // 正在录音时显示为红色
+                    danger={isRecording}
                     shape="circle"
                     icon={isRecording ? <StopFilled /> : <AudioOutlined />}
                     onClick={handleVoiceButtonClick}
-                    disabled={loading && !isRecording} // AI 规划时禁用，但录音时允许停止
+                    disabled={loading && !isRecording}
                   />
                 </Tooltip>
               </div>
@@ -197,13 +211,8 @@ const HomePage: React.FC = () => {
             name="preferences"
             rules={[{ required: true, message: '请输入旅行偏好!' }]}
           >
-            <TextArea
-              rows={3}
-              placeholder="例如：喜欢美食和动漫、希望行程轻松、想去博物馆"
-            />
+            <TextArea rows={3} placeholder="例如：喜欢美食和动漫、希望行程轻松、想去博物馆" />
           </Form.Item>
-          {/* --- 结束 --- */}
-
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={loading} block size="large">
               {loading ? '处理中...' : '生成智能行程'}
@@ -212,18 +221,65 @@ const HomePage: React.FC = () => {
         </Form>
       </Card>
 
-      {loading && !isRecording && ( // 仅在非录音的 loading 状态下显示
+      {/* --- 2. Loading 状态 (无变化) --- */}
+      {loading && !isRecording && (
         <div style={{ textAlign: 'center', marginTop: '40px' }}>
           <Spin size="large" />
           <p style={{ marginTop: '16px' }}>AI 正在努力规划中，请稍候...</p>
         </div>
       )}
 
+      {/* --- 3. 步骤 6.1：结果展示区 (重大更新) --- */}
+      {/* 这里我们不再使用 <pre> 标签
+        而是使用两栏布局，左侧地图，右侧日程
+      */}
       {plan && !loading && (
-        <Card title="您的专属旅行计划" style={{ marginTop: 24 }}>
-          <pre style={{ backgroundColor: '#f5f5f5', padding: '16px', borderRadius: '4px', overflowX: 'auto' }}>
-            {JSON.stringify(plan, null, 2)}
-          </pre>
+        <Card title={plan.title || "您的专属旅行计划"} style={{ marginTop: 24 }}>
+          <Row gutter={[24, 24]}>
+
+            {/* --- 左侧栏：地图和预算 --- */}
+            <Col xs={24} md={12}>
+              <Title level={4}>行程概览地图</Title>
+              {/* 这里使用地图组件，并传入 plan 数据 */}
+              <MapComponent plan={plan} />
+
+              <Title level={4} style={{ marginTop: '16px' }}>预算分析</Title>
+              <p><strong>总估算: {plan.budget_analysis.total_estimate}</strong></p>
+              <Timeline
+                items={plan.budget_analysis.breakdown.map((item) => ({
+                  children: `${item.category}: ${item.cost} (${item.notes})`,
+                }))}
+              />
+            </Col>
+
+            {/* --- 右侧栏：详细日程 --- */}
+            <Col xs={24} md={12}>
+              <Title level={4}>详细日程</Title>
+              {/* 使用折叠面板展示每一天 */}
+              <Collapse defaultActiveKey={['1']}>
+                {plan.daily_plan.map(day => (
+                  <Collapse.Panel header={`第 ${day.day} 天: ${day.theme}`} key={day.day}>
+                    {/* 使用时间轴展示活动 */}
+                    <Timeline>
+                      {day.activities.map((activity, index) => (
+                        <Timeline.Item key={index} dot={<FieldTimeOutlined />}>
+                          <strong>{activity.time}: {activity.activity}</strong>
+                          <p style={{ margin: '4px 0 0 0' }}>{activity.description}</p>
+                          {activity.location.name && (
+                            <p style={{ fontSize: '0.9em', color: '#888', margin: '4px 0 0 0' }}>
+                              <EnvironmentOutlined style={{ marginRight: '4px' }} />
+                              {activity.location.name}
+                            </p>
+                          )}
+                        </Timeline.Item>
+                      ))}
+                    </Timeline>
+                  </Collapse.Panel>
+                ))}
+              </Collapse>
+            </Col>
+
+          </Row>
         </Card>
       )}
     </div>
