@@ -7,6 +7,7 @@ const llmRoutes = require('./routes/llm'); // 引入路由
 const voiceRoutes = require('./routes/voice');
 const plansRoutes = require('./routes/plans');
 const expensesRoutes = require('./routes/expenses');
+const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -28,6 +29,17 @@ app.use('/api/llm', llmRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/expenses', expensesRoutes);
+app.use(express.static(path.join(__dirname, 'public')));
+
+// SPA 回退
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api/')) {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  } else {
+    // 如果是未匹配的 API 路由，可以返回 404
+    res.status(404).send('API endpoint not found');
+  }
+});
 
 app.listen(port, () => {
   console.log(`服务器运行在 http://localhost:${port}`);
