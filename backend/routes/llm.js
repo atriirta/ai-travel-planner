@@ -12,15 +12,23 @@ const createExtractPrompt = (text) => {
   请严格按照以下 JSON 格式返回，所有键都必须存在。
   1. 'destination' (string): 目的地，如果未提及，返回 null。
   2. 'days' (number): 天数，只返回数字，如果未提及，返回 null。
-  3. 'budget' (number): 预算，只返回数字（例如 "1万" 提取为 10000），如果未提及，返回 null。
+  3. 'budget' (number): 预算，只返回数字（例如 "1万" 提取为 10000, "两千" 提取为 2000），如果未提及，返回 null。
   4. 'companions' (string): 同行人数，例如 "2人" 或 "带孩子"，如果未提及，返回 null。
-  5. 'preferences' (string): 除去以上信息后，用户剩余的偏好描述，如果未提及，返回 null。
+  5. 'preferences' (string): 用户的旅行偏好、兴趣点或必须要做的事，例如 "喜欢美食" 或 "想看长城"。如果未提及，返回 null。
 
-  示例:
+  请确保在提取后，所有键都存在于 JSON 中（值为 null 或提取到的值）。
+
+  示例 1:
   - 文本: "我想去美国，7天，预算 2 万，一个人, 喜欢自然风光。"
   - JSON: {"destination": "美国", "days": 7, "budget": 20000, "companions": "1人", "preferences": "喜欢自然风光"}
-  - 文本: "我想去上海玩"
-  - JSON: {"destination": "上海", "days": null, "budget": null, "companions": null, "preferences": null}
+
+  示例 2:
+  - 文本: "我想去上海玩，带孩子。"
+  - JSON: {"destination": "上海", "days": null, "budget": null, "companions": "带孩子", "preferences": null}
+
+  示例 3:
+  - 文本: "去北京 5 天，想看长城和故宫。"
+  - JSON: {"destination": "北京", "days": 5, "budget": null, "companions": null, "preferences": "想看长城和故宫"}
 
   请只返回 JSON 对象，不要包含任何解释性文字或 markdown 标记。
   `;

@@ -14,3 +14,6 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# 临时音频文件
+backend/temp/
