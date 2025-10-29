@@ -2,45 +2,55 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path'); // Ensure path is required
 
-const llmRoutes = require('./routes/llm'); // 引入路由
+// Import Routers
+const llmRoutes = require('./routes/llm');
 const voiceRoutes = require('./routes/voice');
 const plansRoutes = require('./routes/plans');
 const expensesRoutes = require('./routes/expenses');
-const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-// 中间件
-app.use(cors()); // 允许所有跨域请求 (开发)
-app.use(express.json()); // 解析 JSON body
-app.use(express.urlencoded({ extended: true })); // 解析 URL-encoded body
+// --- Core Middleware ---
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// 健康检查路由
+// --- Health Check Route ---
 app.get('/', (req, res) => {
-      // 使用反引号 (`) 替换单引号 (')
-      res.send(`AI Travel Planner 
-      后端已启动!`);
-    });
+  res.send(`AI Travel Planner Backend Started!`);
+});
 
-// TODO: 在这里添加其他 API 路由
+// --- API Routes ---
 app.use('/api/llm', llmRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/expenses', expensesRoutes);
+
+// --- Static File Serving ---
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SPA 回退
-app.get('*', (req, res) => {
-  if (!req.path.startsWith('/api/')) {
+// --- SPA Fallback Middleware (MUST BE LAST HANDLER BEFORE LISTEN) ---
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api/')) {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  } else if (!req.path.startsWith('/api/')) {
+    // Handle non-GET, non-API requests if necessary, or just send 404
+    res.status(404).send('Not Found');
   } else {
-    // 如果是未匹配的 API 路由，可以返回 404
-    res.status(404).send('API endpoint not found');
+    // If it starts with /api/ but wasn't handled, it's an API 404
+    // It might be better handled within specific routers or an error handler
+    // but this catch-all can send a generic API 404.
+    // Let's rely on the previous routes to handle API 404s and just call next()
+     next();
+     // Or send a specific message:
+     // res.status(404).send('API endpoint not found');
   }
 });
 
+// --- Server Listen ---
 app.listen(port, () => {
   console.log(`服务器运行在 http://localhost:${port}`);
 });
