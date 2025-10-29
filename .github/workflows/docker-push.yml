@@ -50,8 +50,8 @@ jobs:
           # 2. 'commit SHA' 标签：为每次提交生成一个唯一的版本标签 (方便回滚)
           # 【注意】请确认这里的命名空间 'aliyun6476841098' 是正确的
           tags: |
-            ${{ secrets.ACR_REGISTRY }}/aliyun6476841098/ai-travel-planner:latest
-            ${{ secrets.ACR_REGISTRY }}/aliyun6476841098/ai-travel-planner:${{ github.sha }}
+            crpi-ulb3rnkr6ld326as.cn-hangzhou.personal.cr.aliyuncs.com/${{ secrets.ACR_USERNAME }}/ai-travel-planner:latest
+            crpi-ulb3rnkr6ld326as.cn-hangzhou.personal.cr.aliyuncs.com/${{ secrets.ACR_USERNAME }}/ai-travel-planner:${{ github.sha }}
           # 启用 GitHub Actions 的缓存，加快后续构建速度
           cache-from: type=gha
           cache-to: type=gha,mode=max
