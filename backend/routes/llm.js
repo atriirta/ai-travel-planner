@@ -4,33 +4,69 @@ const router = express.Router();
 const axios = require('axios');
 
 // [新] 步骤 1：添加实体提取 Prompt
+// [新] 【最终增强版 v3】实体提取 Prompt
 const createExtractPrompt = (text) => {
+  // (我们不再需要前端的简单清理了，让 AI 自己处理)
   return `
-  你是一个信息提取助理。请从以下文本中提取关键旅行信息。
-  文本: "${text}"
+  你是一个信息提取助理。你的任务是分析一段可能包含停顿、重复、口误或语气词的原始语音转录文本，然后提取出关键的旅行信息。
 
-  请严格按照以下 JSON 格式返回，所有键都必须存在。
-  1. 'destination' (string): 目的地，如果未提及，返回 null。
-  2. 'days' (number): 天数，只返回数字，如果未提及，返回 null。
-  3. 'budget' (number): 预算，只返回数字（例如 "1万" 提取为 10000, "两千" 提取为 2000），如果未提及，返回 null。
-  4. 'companions' (string): 同行人数，例如 "2人" 或 "带孩子"，如果未提及，返回 null。
-  5. 'preferences' (string): 用户的旅行偏好、兴趣点或必须要做的事，例如 "喜欢美食" 或 "想看长城"。如果未提及，返回 null。
+  请按照以下两步执行：
 
-  请确保在提取后，所有键都存在于 JSON 中（值为 null 或提取到的值）。
+  **第一步：分析与总结**
+  请先在脑中分析以下原始文本，并总结出用户的核心需求。
+  原始文本: "${text}"
 
-  示例 1:
-  - 文本: "我想去美国，7天，预算 2 万，一个人, 喜欢自然风光。"
-  - JSON: {"destination": "美国", "days": 7, "budget": 20000, "companions": "1人", "preferences": "喜欢自然风光"}
+  **第二步：提取信息**
+  根据你的分析总结，严格按照以下 JSON 格式返回提取的信息。
+  * **所有键都必须存在。**
+  * 如果未提及，**必须**返回 null。
+  * **请进行合理的单位转换** (例如 "一周" -> 7, "2万" -> 20000, "五天" -> 5)。
 
-  示例 2:
-  - 文本: "我想去上海玩，带孩子。"
-  - JSON: {"destination": "上海", "days": null, "budget": null, "companions": "带孩子", "preferences": null}
+  {
+    "destination": "...", // (string | null) 目的地
+    "days": ...,        // (number | null) 天数 (仅数字)
+    "budget": ...,      // (number | null) 预算 (仅数字)
+    "companions": "...",  // (string | null) 同行描述
+    "preferences": "..." // (string | null) 除去以上信息的其他偏好
+  }
 
-  示例 3:
-  - 文本: "去北京 5 天，想看长城和故宫。"
-  - JSON: {"destination": "北京", "days": 5, "budget": null, "companions": null, "preferences": "想看长城和故宫"}
+  **示例 1:**
+  原始文本: "嗯...我想去...我想去美国吧...大概...玩...一个星期...预算...一...两万...都行...就我一个人...然后...喜欢...嗯...自然风光..."
+  (你的内心分析：用户想去美国，玩7天，预算10000-20000，一个人，喜欢自然风光。)
+  返回 JSON:
+  {
+    "destination": "美国",
+    "days": 7,
+    "budget": 20000,
+    "companions": "一个人",
+    "preferences": "喜欢自然风光"
+  }
 
-  请只返回 JSON 对象，不要包含任何解释性文字或 markdown 标记。
+  **示例 2:**
+  原始文本: "那个...去成都...对...成都...玩五天...想吃火锅...看熊猫"
+  (你的内心分析：用户想去成都，玩5天，偏好是吃火锅和看熊猫。未提预算和同伴。)
+  返回 JSON:
+  {
+    "destination": "成都",
+    "days": 5,
+    "budget": null,
+    "companions": null,
+    "preferences": "想吃火锅看熊猫"
+  }
+
+  **示例 3:**
+  原始文本: "喜欢看自然风光，喜欢吃美食"
+  (你的内心分析：用户只提了偏好。未提其他。)
+  返回 JSON:
+  {
+    "destination": null,
+    "days": null,
+    "budget": null,
+    "companions": null,
+    "preferences": "喜欢看自然风光，喜欢吃美食"
+  }
+
+  请只返回最终的 JSON 对象，不要包含任何解释性文字、markdown 标记或你的内心分析过程。
   `;
 };
 
@@ -121,12 +157,12 @@ router.post('/extract', async (req, res) => {
 
   try {
     const prompt = createExtractPrompt(text);
-    const url = 'https://api.deepseek.com/chat/completions';;
+    const url = 'https://api.deepseek.com/chat/completions';
 
     const response = await axios.post(
       url,
       {
-        model: 'deepseek-chat', // 使用 qwen-plus 进行精确提取
+        model: 'deepseek-chat',
         messages: [
           { role: 'system', content: 'You are a helpful entity extraction assistant.' },
           { role: 'user', content: prompt }
@@ -143,24 +179,34 @@ router.post('/extract', async (req, res) => {
 
     const llmResponse = response.data.choices[0].message.content;
 
-    // 尝试解析 LLM 返回的 JSON 字符串
+    // --- [!! 核心修复 !!] ---
+
+    let partialData = {};
     try {
-      const extractedData = JSON.parse(llmResponse);
-
-      // 过滤掉值为 null 的键，防止它们覆盖表单中的默认值
-      const filteredData = {};
-      for (const key in extractedData) {
-        if (extractedData[key] !== null) {
-          // @ts-ignore
-          filteredData[key] = extractedData[key];
-        }
-      }
-
-      res.json(filteredData);
+        // 1. 尝试解析 AI 返回的（可能不完整的）JSON
+        partialData = JSON.parse(llmResponse);
     } catch (e) {
-      console.error('LLM /extract JSON 解析失败:', llmResponse, e);
-      throw new Error("Failed to parse LLM JSON response");
+        // 2. 如果 AI 返回的不是 JSON (例如错误信息或纯文本)
+        // 我们就做一个降级处理：把用户的整句话都当作“偏好”
+        console.error('LLM /extract JSON 解析失败, 降级为仅填充 preferences:', llmResponse, e);
+        partialData = { preferences: text };
     }
+
+    // 3. 【后处理】
+    // 无论 partialData 是什么样子，我们都用它来填充一个“完整”的模板。
+    // 这保证了所有 5 个键一定存在。
+    // 如果 AI 没有返回某个键 (例如 destination)，它在这里会变成 null。
+    const guaranteedData = {
+      destination: partialData.destination || null,
+      days: partialData.days || null,
+      budget: partialData.budget || null,
+      companions: partialData.companions || null,
+      preferences: partialData.preferences || null,
+    };
+
+    // 4. 将这个“干净且完整”的 JSON 返回给前端
+    res.json(guaranteedData);
+    // --- [修复结束] ---
 
   } catch (error) {
     console.error('LLM /extract API Error:', error.response ? error.response.data : error.message);

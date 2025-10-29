@@ -136,14 +136,7 @@ router.post('/transcribe', upload.single('audio'), (req, res) => {
 
               // C. 根据 'pgs' 字段处理（动态修正）
               // 'apd' = 追加, 'rpl' = 替换
-              if (json.data.result.pgs === 'rpl') {
-                // 如果是替换，我们需要更复杂的逻辑来替换之前的片段
-                // 为简化作业，我们暂时只做追加 (apd)
-                // 完整的动态修正请参考讯飞 demo
-                finalTranscription = segment; // 简化处理：用新的覆盖旧的
-              } else {
-                finalTranscription += segment; // 追加
-              }
+              finalTranscription += segment;
 
               // D. 识别结束
               if (json.data.status === 2) { // 2 = 识别最后一块
@@ -179,7 +172,7 @@ router.post('/transcribe', upload.single('audio'), (req, res) => {
               domain: 'iat',
               accent: 'mandarin',
               // vad_eos: 2000, // 后端点静默
-              dwa: 'wpgs' // 开启动态修正
+              // dwa: 'wpgs' // 开启动态修正
             },
             data: {
               status: 0, // 0 = 第一帧
